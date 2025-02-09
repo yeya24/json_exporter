@@ -17,71 +17,93 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus-community/json_exporter/config"
 	"github.com/prometheus-community/json_exporter/exporter"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/promlog"
-	"github.com/prometheus/common/promlog/flag"
+	"github.com/prometheus/common/promslog"
+	"github.com/prometheus/common/promslog/flag"
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
-	"gopkg.in/alecthomas/kingpin.v2"
+	"github.com/prometheus/exporter-toolkit/web/kingpinflag"
 )
 
 var (
-	configFile    = kingpin.Flag("config.file", "JSON exporter configuration file.").Default("config.yml").ExistingFile()
-	listenAddress = kingpin.Flag("web.listen-address", "The address to listen on for HTTP requests.").Default(":7979").String()
-	configCheck   = kingpin.Flag("config.check", "If true validate the config file and then exit.").Default("false").Bool()
-	tlsConfigFile = kingpin.Flag("web.config", "[EXPERIMENTAL] Path to config yaml file that can enable TLS or authentication.").Default("").String()
+	configFile  = kingpin.Flag("config.file", "JSON exporter configuration file.").Default("config.yml").ExistingFile()
+	configCheck = kingpin.Flag("config.check", "If true validate the config file and then exit.").Default("false").Bool()
+	metricsPath = kingpin.Flag(
+		"web.telemetry-path",
+		"Path under which to expose metrics.",
+	).Default("/metrics").String()
+	toolkitFlags = kingpinflag.AddFlags(kingpin.CommandLine, ":7979")
 )
 
 func Run() {
 
-	promlogConfig := &promlog.Config{}
+	promslogConfig := &promslog.Config{}
 
-	flag.AddFlags(kingpin.CommandLine, promlogConfig)
+	flag.AddFlags(kingpin.CommandLine, promslogConfig)
 	kingpin.Version(version.Print("json_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
-	logger := promlog.New(promlogConfig)
+	logger := promslog.New(promslogConfig)
 
-	level.Info(logger).Log("msg", "Starting json_exporter", "version", version.Info())
-	level.Info(logger).Log("msg", "Build context", "build", version.BuildContext())
+	logger.Info("Starting json_exporter", "version", version.Info())
+	logger.Info("Build context", "build", version.BuildContext())
 
-	level.Info(logger).Log("msg", "Loading config file", "file", *configFile)
+	logger.Info("Loading config file", "file", *configFile)
 	config, err := config.LoadConfig(*configFile)
 	if err != nil {
-		level.Error(logger).Log("msg", "Error loading config", "err", err)
+		logger.Error("Error loading config", "err", err)
 		os.Exit(1)
 	}
 	configJSON, err := json.Marshal(config)
 	if err != nil {
-		level.Error(logger).Log("msg", "Failed to marshal config to JSON", "err", err)
+		logger.Error("Failed to marshal config to JSON", "err", err)
 	}
-	level.Info(logger).Log("msg", "Loaded config file", "config", string(configJSON))
+	logger.Info("Loaded config file", "config", string(configJSON))
 
 	if *configCheck {
 		os.Exit(0)
 	}
 
-	http.Handle("/metrics", promhttp.Handler())
+	http.Handle(*metricsPath, promhttp.Handler())
 	http.HandleFunc("/probe", func(w http.ResponseWriter, req *http.Request) {
 		probeHandler(w, req, logger, config)
 	})
+	if *metricsPath != "/" && *metricsPath != "" {
+		landingConfig := web.LandingConfig{
+			Name:        "JSON Exporter",
+			Description: "Prometheus Exporter for converting json to metrics",
+			Version:     version.Info(),
+			Links: []web.LandingLinks{
+				{
+					Address: *metricsPath,
+					Text:    "Metrics",
+				},
+			},
+		}
+		landingPage, err := web.NewLandingPage(landingConfig)
+		if err != nil {
+			logger.Error("error creating landing page", "err", err)
+			os.Exit(1)
+		}
+		http.Handle("/", landingPage)
+	}
 
-	server := &http.Server{Addr: *listenAddress}
-	if err := web.ListenAndServe(server, *tlsConfigFile, logger); err != nil {
-		level.Error(logger).Log("msg", "Failed to start the server", "err", err)
+	server := &http.Server{}
+	if err := web.ListenAndServe(server, toolkitFlags, logger); err != nil {
+		logger.Error("Failed to start the server", "err", err)
 		os.Exit(1)
 	}
 }
 
-func probeHandler(w http.ResponseWriter, r *http.Request, logger log.Logger, config config.Config) {
+func probeHandler(w http.ResponseWriter, r *http.Request, logger *slog.Logger, config config.Config) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -93,7 +115,7 @@ func probeHandler(w http.ResponseWriter, r *http.Request, logger log.Logger, con
 	}
 	if _, ok := config.Modules[module]; !ok {
 		http.Error(w, fmt.Sprintf("Unknown module %q", module), http.StatusBadRequest)
-		level.Debug(logger).Log("msg", "Unknown module", "module", module)
+		logger.Debug("Unknown module", "module", module)
 		return
 	}
 
@@ -101,7 +123,7 @@ func probeHandler(w http.ResponseWriter, r *http.Request, logger log.Logger, con
 
 	metrics, err := exporter.CreateMetricsList(config.Modules[module])
 	if err != nil {
-		level.Error(logger).Log("msg", "Failed to create metrics list from config", "err", err)
+		logger.Error("Failed to create metrics list from config", "err", err)
 	}
 
 	jsonMetricCollector := exporter.JSONMetricCollector{JSONMetrics: metrics}

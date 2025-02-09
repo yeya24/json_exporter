@@ -14,7 +14,7 @@
 package config
 
 import (
-	"io/ioutil"
+	"os"
 
 	pconfig "github.com/prometheus/common/config"
 	"gopkg.in/yaml.v2"
@@ -22,13 +22,14 @@ import (
 
 // Metric contains values that define a metric
 type Metric struct {
-	Name      string
-	Path      string
-	Labels    map[string]string
-	Type      ScrapeType
-	ValueType ValueType
-	Help      string
-	Values    map[string]string
+	Name           string
+	Path           string
+	Labels         map[string]string
+	Type           ScrapeType
+	ValueType      ValueType
+	EpochTimestamp string
+	Help           string
+	Values         map[string]string
 }
 
 type ScrapeType string
@@ -57,6 +58,7 @@ type Module struct {
 	Metrics          []Metric                 `yaml:"metrics"`
 	HTTPClientConfig pconfig.HTTPClientConfig `yaml:"http_client_config,omitempty"`
 	Body             Body                     `yaml:"body,omitempty"`
+	ValidStatusCodes []int                    `yaml:"valid_status_codes,omitempty"`
 }
 
 type Body struct {
@@ -66,7 +68,7 @@ type Body struct {
 
 func LoadConfig(configPath string) (Config, error) {
 	var config Config
-	data, err := ioutil.ReadFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return config, err
 	}

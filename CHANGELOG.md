@@ -1,3 +1,23 @@
+## 0.7.0 / 2025-02-05
+
+* [CHANGE] adopt slog, drop go-kit/log #334
+
+## 0.6.0 / 2023-06-06
+
+* [FEATURE] Allow timestamps from metrics #167
+* [FEATURE] Support Value Conversions #172
+
+## 0.5.0 / 2022-07-03
+
+Breaking Change:
+
+The exporter config file format has changed. It now supports multiple modules
+to scrape different endpoints.
+
+* [FEATURE] Support custom valuetype #145
+* [FEATURE] Support modules configuration #146
+* [FEATURE] Accept non-2xx HTTP status #161
+
 ## 0.4.0 / 2022-01-15
 
 * [FEATURE] Add support for HTTP POST body content #123
